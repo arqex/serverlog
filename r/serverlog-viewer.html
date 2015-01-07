@@ -1,0 +1,233 @@
+<link rel="import" href="bower_components/polymer/polymer.html">
+
+<polymer-element name="serverlog-viewer" attributes="url">
+  <template>
+  	<div class="topbar">
+  		<div class="settings">*</div>
+  		<div class="tabs">
+  			<div class="tab {{consoleCurrent}}" on-click="{{ changeTab }}" data-name="console">Console</div>
+			<template repeat="{{ tab in tabs }}">
+			<div class="tab {{ tab.current }}" on-click="{{ changeTab }}" data-name="{{ tab.name }}">{{ tab.name }}<span class="closetab">X</span></div>
+			</template>
+			<div class="tab tabplus {{plusCurrent}}" on-click="{{ showNewTab }}">+</div>
+  		</div>
+  	</div>
+  	<div class="console open" id="console">
+	<template repeat="{{ line in buffer }}">
+		<div class="line">
+			<span class="line-time">[{{ formatTime( line.timestamp ) }}]</span>
+			<span class="line-content">{{line.line}}</span>
+		</div>
+	</template>
+	</div>
+	<div class="newtab" id="newtab">
+		<div class="filepath">
+			<label for="filepath">Write the log file path in the server:</label>
+			<input type="text" id="filepath"/><button on-click="{{createTab}}">Create</button>
+		</div>
+		<div class="previousLogs">
+			<template repeat="{{ log in logs }}">
+			<a class="logpath">{{ log }}</a>
+			</template>
+		</div>
+	</div>
+	<style>
+		.topbar {
+			padding: 0 10px;
+		}
+
+		.tab{
+			display: inline-block;
+			padding: 0 6px;
+			cursor: pointer;
+		}
+
+		.tab:hover, .settings:hover {
+			background: rgba(255, 255, 255, .1);
+		}
+
+		.tab.current {
+			background: #222;
+			color: #ddd;
+		}
+		.settings {
+			float: right;
+			float: right;
+			font-size: 24px;
+			font-weight: bold;
+			height: 20px;
+			padding: 0 6px;
+		}
+		.console, .newtab {
+			background: #222;
+			padding: 10px;
+			height: 300px;
+			font-size: .9em;
+			line-height: 1em;
+			overflow: auto;
+			color: #ddd;
+			display: none;
+		}
+
+		.console.open, .newtab.open {
+			display: block;
+		}
+
+		.console {
+			font-family: 'Consolas', 'Monaco', 'Courier New', courier;
+		}
+
+		.newtab label {
+			display: block;
+			margin-bottom: 5px;
+		}
+
+		.newtab input {
+			width: 80%;
+		}
+
+		.line {
+		}
+		.line-time {
+			color: #bbb;
+		}
+	</style>
+  </template>
+  <script>
+  	var component = Polymer({
+  		url: '',
+  		bufferSize: 200,
+  		tabs: [],
+  		consoleCurrent: 'current',
+  		plusCurrent: '',
+  		current: {},
+  		ready: function(){
+
+  			this.url = this.attributes.url ? this.attributes.url.value : '';
+
+  			if( !this.url )
+  				return;
+
+  			this.buffers = {console:[]};
+  			this.logPaths = {};
+  			this.changeTab( 'console' );
+
+  			this.updateTimer();
+  		},
+
+  		updateTimer: function(){
+  			if( this.timer )
+  				clearInterval( this.timer );
+
+  			var me = this;
+  			this.buffer = this.current.buffer;
+  			this.lastTime = this.buffer.length ? this.buffer[0].timestamp : false;
+  			this.file = this.current.path;
+
+  			this.timer = setInterval( function(){
+				var url = me.url,
+					params = [],
+					req
+				;
+
+				if( me.lastTime )
+					params.push( 'lastTime=' + me.lastTime );
+				if( me.file )
+					params.push( 'file=' + me.file );
+
+				if( params.length )
+					url += '?' + params.join( '&' );
+
+				req = getJSON( url );
+
+				req.onload = function(){
+					var lines = JSON.parse( req.responseText );
+
+					if( !lines.length )
+						return;
+
+					me.lastTime = lines[0].timestamp;
+
+					me.buffer = lines.concat( me.buffer );
+
+					if( me.buffer.length > me.bufferSize )
+						me.buffer = me.buffer.splice( 0, me.bufferSize );
+
+					console.log( lines );
+				};
+			}, 1000 );
+  		},
+
+  		formatTime: function( timestamp ){
+			var date = new Date( timestamp );
+
+			return date.getHours() + ':' + date.getMinutes() + ':' + date.getSeconds();
+		},
+
+		showNewTab: function(){
+			this.setCurrentTab('plus');
+
+			this.$.console.setAttribute('class', 'console');
+			this.$.newtab.setAttribute('class', 'newtab open');
+		},
+
+		setCurrentTab: function( name ){
+
+			this.consoleCurrent = name == 'console' ? 'current' : '';
+			this.plusCurrent = name == 'plus' ? 'current' : '';
+
+			var t;
+			for (var i = 0; i < this.tabs.length; i++) {
+				t = this.tabs[i];
+				if( t.name == name )
+					t.current = 'current';
+				else
+					t.current = '';
+			}
+		},
+
+		handleTabClick: function( e ){
+			this.changeTab( e.target.dataset.name );
+		},
+
+		changeTab: function( tabName ){
+
+			this.setCurrentTab( tabName );
+			this.current = {
+				name: tabName,
+				path: this.logPaths[ tabName ],
+				buffer: this.buffers[ tabName ]
+			};
+
+			this.$.console.setAttribute('class', 'console open');
+			this.$.newtab.setAttribute('class', 'newtab');
+
+			this.updateTimer();
+		},
+
+		createTab: function(){
+			var path = this.$.filepath.value,
+				segments = path.split('/'),
+				name
+			;
+
+			if( path.length )
+				name = segments[ segments.length - 1 ];
+
+			this.tabs.push( {name: name, current: ''} );
+			this.logPaths[ name ] = path;
+			this.buffers[ name ] = [];
+
+			this.changeTab( name );
+		}
+  	});
+
+  	var getJSON = function( url ){
+		var request = new XMLHttpRequest();
+		request.open('GET', url, true);
+		request.send();
+
+		return request;
+	};
+  </script>
+</polymer-element>
